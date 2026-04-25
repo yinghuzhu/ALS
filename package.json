@@ -1,0 +1,24 @@
+{
+  "name": "asl",
+  "version": "0.1.0",
+  "description": "AISessionLog - Local AI session log sync pipeline",
+  "type": "module",
+  "bin": {
+    "asl": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "vitest"
+  },
+  "keywords": ["ai", "session", "log", "claude", "codex", "opencode"],
+  "author": "yzh",
+  "license": "ISC",
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "sql.js": "^1.10.3",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "vitest": "^1.3.0"
+  }
+}
