@@ -4,7 +4,7 @@
  */
 
 /**
- * @typedef {'claude_code' | 'codex_cli' | 'opencode'} SourceType
+ * @typedef {'claude_code' | 'codex_cli' | 'opencode' | 'codebuddy'} SourceType
  */
 
 /**

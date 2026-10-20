@@ -1,6 +1,6 @@
 /**
  * ASL 文件监听模块
- * 使用 chokidar 监听三个数据源的文件变更
+ * 使用 chokidar 监听 JSONL 数据源的文件变更
  */
 
 import chokidar from 'chokidar';
@@ -14,8 +14,12 @@ const DEBOUNCE_MS = 300;
 const SOURCE_PATHS = {
   claude_code: expandTilde('~/.claude/projects/**/*'),
   codex: expandTilde('~/.codex/sessions/**/*.jsonl'),
+  codebuddy: expandTilde('~/.codebuddy/projects/**/*.jsonl'),
   opencode: expandTilde('~/.local/share/opencode/') // SQLite 文件，不需要监听
 };
+
+/** 需要监听的数据源（OpenCode 走手动同步） */
+const WATCHED_SOURCES = ['claude_code', 'codex', 'codebuddy'];
 
 let watchers = new Map();
 let onFileChangeCallback = null;
@@ -48,45 +52,29 @@ function debounce(func, wait) {
 export async function startWatching() {
   console.log('🔍 启动文件监听...');
   
-  // Claude Code 监听
-  const claudeWatcher = chokidar.watch(SOURCE_PATHS.claude_code, {
-    ignored: /(^|[\/\\])\../, // 忽略隐藏文件
-    persistent: true,
-    ignoreInitial: true,
-    awaitWriteFinish: {
-      stabilityThreshold: DEBOUNCE_MS,
-      pollInterval: 100
-    }
-  });
-  
-  claudeWatcher
-    .on('add', debounce(handleFileChange('claude_code', 'add'), DEBOUNCE_MS))
-    .on('change', debounce(handleFileChange('claude_code', 'change'), DEBOUNCE_MS))
-    .on('unlink', debounce(handleFileChange('claude_code', 'unlink'), DEBOUNCE_MS));
-  
-  watchers.set('claude_code', claudeWatcher);
-  
-  // Codex CLI 监听
-  const codexWatcher = chokidar.watch(SOURCE_PATHS.codex, {
-    ignored: /(^|[\/\\])\../,
-    persistent: true,
-    ignoreInitial: true,
-    awaitWriteFinish: {
-      stabilityThreshold: DEBOUNCE_MS,
-      pollInterval: 100
-    }
-  });
-  
-  codexWatcher
-    .on('add', debounce(handleFileChange('codex', 'add'), DEBOUNCE_MS))
-    .on('change', debounce(handleFileChange('codex', 'change'), DEBOUNCE_MS))
-    .on('unlink', debounce(handleFileChange('codex', 'unlink'), DEBOUNCE_MS));
-  
-  watchers.set('codex', codexWatcher);
-  
+  for (const source of WATCHED_SOURCES) {
+    const watcher = chokidar.watch(SOURCE_PATHS[source], {
+      ignored: /(^|[\/\\])\../, // 忽略隐藏文件
+      persistent: true,
+      ignoreInitial: true,
+      awaitWriteFinish: {
+        stabilityThreshold: DEBOUNCE_MS,
+        pollInterval: 100
+      }
+    });
+
+    watcher
+      .on('add', debounce(handleFileChange(source, 'add'), DEBOUNCE_MS))
+      .on('change', debounce(handleFileChange(source, 'change'), DEBOUNCE_MS))
+      .on('unlink', debounce(handleFileChange(source, 'unlink'), DEBOUNCE_MS));
+
+    watchers.set(source, watcher);
+  }
+
   console.log('✅ 文件监听已启动');
-  console.log('  - Claude Code: ~/.claude/projects/');
-  console.log('  - Codex CLI: ~/.codex/sessions/');
+  for (const source of WATCHED_SOURCES) {
+    console.log(`  - ${source}: ${SOURCE_PATHS[source]}`);
+  }
   console.log('  - OpenCode: 手动同步（SQLite）');
 }
 

@@ -6,6 +6,7 @@
 
 import { parseClaudeCodeFile } from '../src/adapters/claude.js';
 import { parseCodexFile } from '../src/adapters/codex.js';
+import { parseCodeBuddyFile } from '../src/adapters/codebuddy.js';
 import { parseOpenCodeFromJson } from '../src/adapters/opencode.js';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -71,6 +72,35 @@ for (const file of codexFiles) {
       totalMessages += session.messages.length;
     } else {
       console.log(`  ⚠️  ${file} - No sessions parsed`);
+    }
+  } catch (e) {
+    console.log(`  ❌ ${file} - ${e.message}`);
+    errors.push({ file, error: e.message });
+  }
+}
+
+// Test CodeBuddy samples
+console.log('\n📁 CodeBuddy Samples:');
+console.log('-'.repeat(50));
+const codebuddyDir = join(SAMPLES_DIR, 'codebuddy');
+const codebuddyFiles = readdirSync(codebuddyDir).filter(f => f.endsWith('.jsonl'));
+
+for (const file of codebuddyFiles) {
+  try {
+    const filePath = join(codebuddyDir, file);
+    const sessions = parseCodeBuddyFile(filePath);
+
+    if (sessions.length > 0) {
+      const session = sessions[0];
+      console.log(`  ✅ ${file.substring(0, 40)}...`);
+      console.log(`     Session: ${session.sourceId.substring(0, 8)}...`);
+      console.log(`     Project: ${session.project}`);
+      console.log(`     Messages: ${session.messages.length}`);
+      totalSessions++;
+      totalMessages += session.messages.length;
+    } else {
+      // 只有 CLI 噪音（/model 切换等）的会话，解析为 0 个会话是预期行为
+      console.log(`  ⏭️  ${file.substring(0, 40)}... - noise-only session, skipped`);
     }
   } catch (e) {
     console.log(`  ❌ ${file} - ${e.message}`);
