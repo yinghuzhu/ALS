@@ -95,6 +95,8 @@ function renderMessage(message, index) {
         content += `\n<details>\n<summary>📤 工具返回${block.content.length > 500 ? ' (前 500 字符)' : ''}</summary>\n\n`;
         content += `\`\`\`\n${preview}\n\`\`\`\n`;
         content += `\n</details>\n`;
+      } else if (block.type === 'image' && block.content) {
+        content += `\n> 图片：${block.content}\n`;
       } else if (block.type === 'text' && block.content) {
         // 普通文本块
         content += `${block.content}\n`;

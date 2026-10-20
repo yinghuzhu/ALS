@@ -3,7 +3,7 @@
 **Version:** v0.1.0 "Spark"  
 **Status:** v0.1 "Spark" Complete ✅
 
-Local AI session log sync pipeline that transforms session records from Claude Code, Codex CLI, CodeBuddy, and OpenCode into standardized format for Obsidian output.
+Local AI session log sync pipeline that transforms session records from Claude Code, Codex CLI, CodeBuddy, WorkBuddy, and OpenCode into standardized format for Obsidian output.
 
 ---
 
@@ -25,7 +25,9 @@ AISessionLog/
 │   ├── adapters/
 │   │   ├── claude.js      # Claude Code JSONL parser ✅
 │   │   ├── codex.js       # Codex CLI JSONL parser ✅
+│   │   ├── sessionLog.js  # CodeBuddy/WorkBuddy 共享 JSONL 解析实现 ✅
 │   │   ├── codebuddy.js   # CodeBuddy Code JSONL parser ✅
+│   │   ├── workbuddy.js   # WorkBuddy JSONL parser ✅
 │   │   └── opencode.js    # OpenCode SQLite/JSON parser ✅
 │   ├── core/
 │   │   ├── types.js       # Standard data models ✅
@@ -41,6 +43,7 @@ AISessionLog/
 │   ├── claude.test.js     # Claude adapter tests ✅
 │   ├── codex.test.js      # Codex adapter tests ✅
 │   ├── codebuddy.test.js  # CodeBuddy adapter tests ✅
+│   ├── workbuddy.test.js  # WorkBuddy adapter tests ✅
 │   ├── opencode.test.js   # OpenCode adapter tests ✅
 │   └── verify-adapters.js # Sample data verification ✅
 ├── samples/               # Test data
@@ -118,6 +121,11 @@ asl --help
   - 纯噪音会话（只有 `/model` 切换、本地命令回显）跳过
   - 本机 139 个文件（含 21 个子 Agent 转录）→ 99 个有效会话 / 15.2k 条消息，0 错误
 
+- [x] **WorkBuddyAdapter** - Parses `~/.workbuddy/projects/*.jsonl`
+  - 与 CodeBuddy 同一套记录格式，共享 `adapters/sessionLog.js`，只差存档目录与 source 标识
+  - 额外处理 `input_image`（截图引用）与 `credit-usage`（按额度计费的调用）
+  - 本机 28 个文件 → 28 个会话 / 4,018 条消息，0 错误
+
 - [x] **OpenCodeAdapter** - Parses SQLite (message + part 双表 JOIN) / JSON samples
   - SQLite 原生读取（逐 session prepared statement，避免全量加载）
   - part 表按 type 分类处理（text/reasoning/tool 保留，step-*/patch/file/compaction 跳过）
@@ -125,17 +133,17 @@ asl --help
 
 ### Phase 3: Test Validation ✅
 
-- [x] 40 unit tests (9-13 per adapter)
+- [x] 50 unit tests (9-13 per adapter)
 - [x] Sample data verification script
 - [x] 100% sample data parse success rate
 
 **Test Results:**
 ```
-Test Files  4 passed (4)
-Tests       40 passed (40)
+Test Files  5 passed (5)
+Tests       50 passed (50)
 
-Total Sessions:  28
-Total Messages:  483
+Total Sessions:  29
+Total Messages:  488
 Errors:          0
 ```
 
@@ -143,9 +151,13 @@ Errors:          0
 
 - [x] **SQLite state storage** (`db/state.js`) - sql.js, sync_state/sessions/parse_errors 三张表
 - [x] **Obsidian sink** (`sink/obsidian.js`) - Markdown 渲染、frontmatter、工具调用折叠、增量水位线
-- [x] **File watcher** (`core/watcher.js`) - chokidar + 300ms 防抖
-- [x] **Scanner** (`core/scanner.js`) - 统一扫描接口、增量同步、错误处理；四个 JSONL 数据源共用 `scanJsonlSource`
+- [x] **File watcher** (`core/watcher.js`) - chokidar + 300ms 防抖，变更即触发单文件增量同步
+- [x] **Scanner** (`core/scanner.js`) - 统一扫描接口、增量同步、错误处理；JSONL 数据源共用 `scanJsonlSource` / `syncJsonlFile`
 - [x] **CLI commands** - pull, watch, sync, status, logs --errors
+
+> 注意：数据源目录都在 `~/.codex`、`~/.claude` 这类点目录下，chokidar 的 `ignored: /(^|[\/])\./` 会把整棵树排除掉（watch 静默失效），因此不能按隐藏文件过滤。
+
+- [x] **OpenCode 大库支持** - 数据库超过 sql.js 的 2 GiB 上限时自动回退到系统 `sqlite3` CLI，并按 `time_updated` 增量读取
 
 ---
 
@@ -157,7 +169,7 @@ Errors:          0
 {
   id: string,              // Internal unique ID
   sourceId: string,        // Original tool session ID
-  source: 'claude_code' | 'codex_cli' | 'codebuddy' | 'opencode',
+  source: 'claude_code' | 'codex_cli' | 'codebuddy' | 'workbuddy' | 'opencode',
   status: 'complete' | 'partial' | 'corrupted',
   project: string,         // Project name from path
   projectPath: string,     // Full project path
@@ -208,6 +220,7 @@ Output:
 ✅ Claude Code: 4 sessions, 66 messages
 ✅ Codex CLI:   3 sessions, 310 messages
 ✅ CodeBuddy:   1 session, 7 messages (另有 1 个纯噪音文件被跳过)
+✅ WorkBuddy:   1 session, 5 messages
 ✅ OpenCode:    20 sessions, 100 messages (sampled)
 ```
 

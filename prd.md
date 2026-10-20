@@ -6,7 +6,7 @@
 
 ### 用户是谁
 
-AISessionLog 的目标用户是重度 AI 编程工具使用者，具体画像如下：每天使用 Claude Code、OpenAI Codex CLI、CodeBuddy、OpenCode 等终端 AI 工具超过 1 小时；同时使用 2 个及以上工具；已经在使用 Obsidian 或类似本地知识库工具；对"本地优先、数据可控、可迁移"有明确偏好；习惯把工程过程文档化。
+AISessionLog 的目标用户是重度 AI 编程工具使用者，具体画像如下：每天使用 Claude Code、OpenAI Codex CLI、CodeBuddy、WorkBuddy、OpenCode 等终端 AI 工具超过 1 小时；同时使用 2 个及以上工具；已经在使用 Obsidian 或类似本地知识库工具；对"本地优先、数据可控、可迁移"有明确偏好；习惯把工程过程文档化。
 
 这不是大众产品，是一个高密度、窄人群、强自用驱动的开发者基础设施工具。
 
@@ -42,7 +42,7 @@ AISessionLog 是一个本地数据管道：持续、自动地将各工具的会�
 
 ### 3.1 数据采集
 
-支持四个数据源的本地文件读取。工具会在首次运行时执行全量历史扫描，此后通过文件监听实现增量同步。
+支持五个数据源的本地文件读取。工具会在首次运行时执行全量历史扫描，此后通过文件监听实现增量同步。
 
 重要声明：AISessionLog 读取的是各工具在本地磁盘的落盘文件，属于实现细节而非公开稳定协议。各工具版本升级可能导致格式变化，工具会尽力兼容，但不承诺对所有历史版本的完整支持。部分场景（如远程执行、云端会话）的记录可能未落盘到本地，属于正常的数据缺失，不视为 Bug。
 
@@ -68,7 +68,7 @@ AISessionLog 是一个本地数据管道：持续、自动地将各工具的会�
 
 ### 已知风险
 
-- **数据源格式不稳定**：四个工具均未公开稳定的本地存储协议，任何版本升级都可能导致 Adapter 失效。缓解措施是将每个工具的解析逻辑封装为独立模块，快速响应格式变化。
+- **数据源格式不稳定**：五个工具均未公开稳定的本地存储协议，任何版本升级都可能导致 Adapter 失效。缓解措施是将每个工具的解析逻辑封装为独立模块，快速响应格式变化。
 - **写缓冲区问题**：AI 工具在输出时可能高频追加 JSONL，频繁触发文件变更事件会导致 CPU 占用过高并频繁刷新 Obsidian 索引。需要在采集层实现防抖延迟写入机制。
 
 ### 已验证的数据格式（2026-03-29 详细核对）
@@ -81,6 +81,7 @@ AISessionLog 是一个本地数据管道：持续、自动地将各工具的会�
 | **Codex CLI** | 47 个文件 | 42,571 行 | 91 MB | ~906 行/会话 |
 | **OpenCode** | 332 个会话 | 36,238 条消息 | 768 MB | ~109 消息/会话 |
 | **CodeBuddy** | 139 个文件（99 会话） | 21,321 行 | 84 MB | ~26 行/会话 |
+| **WorkBuddy** | 28 个文件（28 会话） | 5,988 行 | 27 MB | ~214 行/会话 |
 
 **记录类型分布**:
 
@@ -90,6 +91,7 @@ AISessionLog 是一个本地数据管道：持续、自动地将各工具的会�
 | **Codex CLI** | `response_item` (52%), `event_msg` (38%) | `session_meta` (1 条/会话), `turn_context` |
 | **OpenCode** | `user`, `assistant` | `compaction` (自动摘要) |
 | **CodeBuddy** | `message` (user/assistant), `function_call`, `function_call_result` | `reasoning`, `file-history-snapshot` (6%), `session-meta`, `ai-title`, `summary`, `turn-metrics`, `model-usage` |
+| **WorkBuddy** | `message` (user/assistant), `function_call`, `function_call_result` | `reasoning`, `file-history-snapshot`, `session-meta`(数十条/文件), `ai-title`, `credit-usage` |
 
 **存储路径**:
 
@@ -99,6 +101,7 @@ AISessionLog 是一个本地数据管道：持续、自动地将各工具的会�
 | **Codex CLI** | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `samples/codex/*.jsonl` (3 个文件) |
 | **OpenCode** | `~/.local/share/opencode/opencode.db` | `samples/opencode/sessions_list.json` (20 个会话) |
 | **CodeBuddy** | `~/.codebuddy/projects/<encoded-cwd>/<sessionId>.jsonl` | `samples/codebuddy/*.jsonl` (2 个文件) |
+| **WorkBuddy** | `~/.workbuddy/projects/<encoded-cwd>/<sessionId>.jsonl` | `samples/workbuddy/*.jsonl` (1 个文件) |
 
 ### 隐私声明（产品层面告知）
 
