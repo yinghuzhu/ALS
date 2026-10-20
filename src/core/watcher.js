@@ -15,11 +15,12 @@ const SOURCE_PATHS = {
   claude_code: expandTilde('~/.claude/projects/**/*'),
   codex: expandTilde('~/.codex/sessions/**/*.jsonl'),
   codebuddy: expandTilde('~/.codebuddy/projects/**/*.jsonl'),
+  workbuddy: expandTilde('~/.workbuddy/projects/**/*.jsonl'),
   opencode: expandTilde('~/.local/share/opencode/') // SQLite 文件，不需要监听
 };
 
 /** 需要监听的数据源（OpenCode 走手动同步） */
-const WATCHED_SOURCES = ['claude_code', 'codex', 'codebuddy'];
+const WATCHED_SOURCES = ['claude_code', 'codex', 'codebuddy', 'workbuddy'];
 
 let watchers = new Map();
 let onFileChangeCallback = null;
@@ -54,7 +55,8 @@ export async function startWatching() {
   
   for (const source of WATCHED_SOURCES) {
     const watcher = chokidar.watch(SOURCE_PATHS[source], {
-      ignored: /(^|[\/\\])\../, // 忽略隐藏文件
+      // 不能按 "隐藏文件" 过滤：数据源目录本身就在 ~/.codex、~/.claude 这类点目录下，
+      // /(^|[\/\\])\./ 会把整个目录都排除掉。glob 已限定 *.jsonl，无需额外 ignored
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: {

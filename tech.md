@@ -19,6 +19,7 @@ flowchart TD
         S2["Codex CLI\n~/.codex/sessions/\n✅ 已验证"]
         S3["OpenCode\n~/.local/share/opencode/\n✅ 已验证"]
         S4["CodeBuddy\n~/.codebuddy/projects/\n✅ 已验证"]
+        S5["WorkBuddy\n~/.workbuddy/projects/\n✅ 已验证"]
     end
 
     subgraph Collector["采集层"]
@@ -30,7 +31,7 @@ flowchart TD
         P1["ClaudeCodeAdapter"]
         P2["CodexAdapter"]
         P3["OpenCodeAdapter"]
-        P4["CodeBuddyAdapter"]
+        P4["CodeBuddy / WorkBuddy Adapter\n共享 sessionLog.js"]
     end
 
     subgraph Core["核心"]
@@ -44,7 +45,7 @@ flowchart TD
         SK3["SQLiteSink\n预留接口"]
     end
 
-    S1 & S2 & S3 & S4 --> C1 & C2
+    S1 & S2 & S3 & S4 & S5 --> C1 & C2
     C1 & C2 --> P1 & P2 & P3 & P4
     P1 & P2 & P3 & P4 --> M --> DB --> SK1
     DB -.-> SK2 & SK3
@@ -376,6 +377,10 @@ CREATE TABLE part (
 | `message.data.model.modelID` | `model` | 模型，如 `glm-4.7` |
 | `message.data.tokens` | `promptTokens` / `completionTokens` | Token 统计 |
 
+**大库与增量**:
+- `opencode.db` 超过 **2 GiB** 时 sql.js 无法加载（当前库 2.6 GB），自动回退到系统 `sqlite3` CLI（`-json` + `mode=ro`，逐个 session 查询）
+- 只读取 `time_updated > 上次同步时间 - 5 分钟` 的 session，避免每次同步都重建 1000+ 篇笔记（实测全量 48s → 增量 2s）
+
 **解析策略**:
 1. 用 prepared statement 逐 session 查询（763MB 数据库，避免全量加载）
 2. 查询 `message LEFT JOIN part`，按 `message.time_created ASC, part.time_created ASC` 排序
@@ -398,11 +403,13 @@ WHERE m.session_id = ?
 ORDER BY m.time_created ASC, p.time_created ASC
 ```
 
-### CodeBuddyAdapter ✅ 已验证
+### CodeBuddyAdapter / WorkBuddyAdapter ✅ 已验证
 
-**输入**: `~/.codebuddy/projects/<encoded-cwd>/<sessionId>.jsonl`
+**输入**:
+- CodeBuddy: `~/.codebuddy/projects/<encoded-cwd>/<sessionId>.jsonl`
+- WorkBuddy: `~/.workbuddy/projects/<encoded-cwd>/<sessionId>.jsonl`
 
-CodeBuddy Code 的存储与 Claude Code 同构（JSONL，一行一条记录），但工具调用是**独立记录**而非 content block。
+CodeBuddy Code 的存储与 Claude Code 同构（JSONL，一行一条记录），但工具调用是**独立记录**而非 content block。WorkBuddy 桌面端使用完全相同的记录格式（同一套 `codebuddy.ai/*` 元数据），因此解析实现集中在 `src/adapters/sessionLog.js`，两个 Adapter 只负责路径判定与 `source` / id 前缀。
 
 **记录类型**:
 
@@ -415,6 +422,7 @@ CodeBuddy Code 的存储与 Claude Code 同构（JSONL，一行一条记录）�
 | `reasoning` | 模型思考过程 | v0.1 丢弃，仅计数 `rawMeta.reasoningRecords` |
 | `summary` / `ai-title` | 首条请求 / AI 标题 | `rawMeta.summary`、`rawMeta.aiTitle` |
 | `turn-metrics` / `model-usage` | 轮次时延 / token 用量 | `rawMeta.turns`、`rawMeta.tokens` |
+| `credit-usage` | 按额度计费的调用（图片生成等） | `rawMeta.credits` |
 | `file-history-snapshot` | 文件快照 | 忽略 |
 
 **字段映射**:
@@ -442,7 +450,17 @@ CodeBuddy Code 的存储与 Claude Code 同构（JSONL，一行一条记录）�
 - `<task-notification>`（含其后的使用说明）
 - `<cb_summary>` / `<conversation_history_summary>`（上下文压缩注入的摘要，可嵌套，需循环清洗）
 
-**实测**: 139 个文件（含 21 个子 Agent 转录）/ 99 个有效会话 / 15,157 条消息，解析 0 错误；40 个纯噪音文件被跳过。
+**WorkBuddy 差异**:
+- `input_image` 把图片引用再包一层（`{ type: 'input_image', image: { type: 'image_blob_ref', ... } }`），解析时摊平成 `image` block
+- 没有 `turn-metrics` / `model-usage`，改用 `credit-usage`（`providerData.credit` 累加到 `rawMeta.credits`）
+- 一个文件里可能有几十条 `session-meta`（每次写入追加一条），取最后一条有效值
+- ObsidianSink 会把 `image` block 渲染成 `> 图片：<blob_path>`
+
+**实测**:
+- CodeBuddy: 139 个文件（含 21 个子 Agent 转录）/ 99 个有效会话 / 15,157 条消息，解析 0 错误；40 个纯噪音文件被跳过
+- WorkBuddy: 28 个文件 / 28 个会话 / 4,018 条消息，解析 0 错误；6 张截图引用、39.97 credits
+
+> WorkBuddy 的 `~/.workbuddy/workbuddy.db` 里还有 20 条 session 元数据（标题、状态、用量），但本机仅 12 条能对上 jsonl 转录，其余 8 条转录已被清理。数据库是 WAL 模式，sql.js 读不到未 checkpoint 的写入，因此 v0.1 只接文件，不读该库。
 
 ## 五、SQLite 状态存储
 

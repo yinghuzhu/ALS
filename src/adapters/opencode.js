@@ -7,7 +7,8 @@
  * 2. JSON sample files (testing): sessions_list.json + messages_sample.jsonl
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { basename } from 'path';
 import initSqlJs from 'sql.js';
@@ -96,7 +97,19 @@ function parsePartsIntoBlocks(parts) {
  * @param {string} dbPath - Path to opencode.db
  * @returns {Promise<import('../core/types.js').StandardSession[]>}
  */
-export async function parseOpenCodeFromSqlite(dbPath) {
+export async function parseOpenCodeFromSqlite(dbPath, { since = 0 } = {}) {
+  // sql.js 把整个文件读进内存，超过 2 GiB 会直接抛错，此时回退到系统 sqlite3 CLI
+  if (statSync(dbPath).size > SQLJS_MAX_BYTES) {
+    console.warn(`opencode.db 超过 sql.js 的 2 GiB 上限，改用 sqlite3 CLI 读取: ${dbPath}`);
+    return parseOpenCodeFromSqliteCli(dbPath, since);
+  }
+
+  return parseOpenCodeWithSqlJs(dbPath, since);
+}
+
+const SQLJS_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+
+async function parseOpenCodeWithSqlJs(dbPath, since = 0) {
   const fileBuffer = readFileSync(dbPath);
   const SQL = await initSqlJs();
   const db = new SQL.Database(fileBuffer);
@@ -105,11 +118,14 @@ export async function parseOpenCodeFromSqlite(dbPath) {
     const sessions = [];
 
     // 1. Iterate sessions via prepared statement (memory-friendly)
+    // since > 0 时只取上次同步之后更新过的 session，避免每次都全量重建 1000+ 篇笔记
     const sessStmt = db.prepare(`
       SELECT id, slug, title, directory, time_created, time_updated
       FROM session
+      WHERE time_updated > ?
       ORDER BY time_created DESC
     `);
+    sessStmt.bind([since]);
 
     while (sessStmt.step()) {
       const [sessionId, slug, title, directory, sessCreated, sessUpdated] = sessStmt.get();
@@ -150,33 +166,7 @@ export async function parseOpenCodeFromSqlite(dbPath) {
       msgStmt.free();
 
       // 3. Build StandardMessages
-      const parsedMessages = [];
-
-      for (const [mid, { timeCreated, data, parts }] of msgMap) {
-        const contentBlocks = parsePartsIntoBlocks(parts);
-        if (contentBlocks.length === 0) continue;
-
-        const role = data.role || 'user';
-        const timestamp = new Date(data.time?.created || timeCreated);
-
-        const renderedText = contentBlocks
-          .filter(b => b.type === 'text')
-          .map(b => b.content)
-          .join('\n');
-
-        parsedMessages.push({
-          id: mid,
-          role,
-          eventType: 'message',
-          renderedText: renderedText || `${role} message`,
-          contentBlocks,
-          rawContent: data,
-          timestamp,
-          promptTokens: data.tokens?.input,
-          completionTokens: data.tokens?.output,
-        });
-      }
-
+      const parsedMessages = messagesFromMsgMap(msgMap);
       if (parsedMessages.length === 0) continue;
 
       const projectName = directory ? directory.split('/').pop() : (slug || 'unknown');
@@ -211,6 +201,157 @@ export async function parseOpenCodeFromSqlite(dbPath) {
   } finally {
     db.close();
   }
+}
+
+/**
+ * 把 (messageId → { data, parts }) 映射转换成 StandardMessage 列表
+ */
+function messagesFromMsgMap(msgMap) {
+  const parsedMessages = [];
+
+  for (const [mid, { timeCreated, data, parts }] of msgMap) {
+    const contentBlocks = parsePartsIntoBlocks(parts);
+    if (contentBlocks.length === 0) continue;
+
+    const role = data.role || 'user';
+    const timestamp = new Date(data.time?.created || timeCreated);
+
+    const renderedText = contentBlocks
+      .filter(b => b.type === 'text')
+      .map(b => b.content)
+      .join('\n');
+
+    parsedMessages.push({
+      id: mid,
+      role,
+      eventType: 'message',
+      renderedText: renderedText || `${role} message`,
+      contentBlocks,
+      rawContent: data,
+      timestamp,
+      promptTokens: data.tokens?.input,
+      completionTokens: data.tokens?.output,
+    });
+  }
+
+  return parsedMessages;
+}
+
+/**
+ * 由会话行 + 已过滤的消息组装 StandardSession
+ */
+function assembleSession({ sessionId, slug, title, directory, createdAt, updatedAt, messages }, dbPath) {
+  const projectName = directory ? directory.split('/').pop() : (slug || 'unknown');
+
+  return {
+    id: `opencode_${sessionId}`,
+    sourceId: sessionId,
+    source: 'opencode',
+    status: 'complete',
+    project: projectName,
+    projectPath: directory || 'unknown',
+    model: messages[0]?.rawContent?.model?.modelID
+        || messages[0]?.rawContent?.modelID
+        || 'unknown',
+    createdAt: new Date(createdAt),
+    updatedAt: new Date(updatedAt),
+    ingestedAt: new Date(),
+    messages,
+    sourcePath: dbPath,
+    parserVersion: PARSER_VERSION,
+    contentHash: calculateHash(JSON.stringify({ id: sessionId, slug, title })),
+    parseWarnings: [],
+    rawMeta: { slug, title },
+  };
+}
+
+/**
+ * 超过 sql.js 2 GiB 上限时的读取路径：借系统 sqlite3 CLI 只读查询
+ * 逐个 session 查询，避免把 2.6 GB 的库整体读入内存
+ */
+async function parseOpenCodeFromSqliteCli(dbPath, since = 0) {
+  const uri = `file:${dbPath}?mode=ro`;
+
+  const sessionRows = runSqliteJson(uri, `
+    SELECT id, slug, title, directory, time_created, time_updated
+    FROM session
+    WHERE time_updated > ${Number(since) || 0}
+    ORDER BY time_created DESC
+  `);
+
+  const sessions = [];
+
+  for (const row of sessionRows) {
+    const msgRows = runSqliteJson(uri, `
+      SELECT
+        m.id           AS mid,
+        m.time_created AS mtime,
+        m.data         AS mdata,
+        p.id           AS pid,
+        p.data         AS pdata
+      FROM message m
+      LEFT JOIN part p ON m.id = p.message_id
+      WHERE m.session_id = ${quoteSql(row.id)}
+      ORDER BY m.time_created ASC, p.time_created ASC
+    `);
+
+    const msgMap = new Map();
+
+    for (const msgRow of msgRows) {
+      if (!msgMap.has(msgRow.mid)) {
+        let msgData = {};
+        try { msgData = typeof msgRow.mdata === 'string' ? JSON.parse(msgRow.mdata) : {}; } catch (_) { /* empty */ }
+        msgMap.set(msgRow.mid, { timeCreated: msgRow.mtime, data: msgData, parts: [] });
+      }
+
+      if (msgRow.pid) {
+        let pd = {};
+        try { pd = typeof msgRow.pdata === 'string' ? JSON.parse(msgRow.pdata) : {}; } catch (_) { /* empty */ }
+        msgMap.get(msgRow.mid).parts.push(pd);
+      }
+    }
+
+    const parsedMessages = messagesFromMsgMap(msgMap);
+    if (parsedMessages.length === 0) continue;
+
+    const filteredMessages = filterCliNoise(parsedMessages);
+    if (filteredMessages.length === 0) continue;
+
+    sessions.push(assembleSession(
+      {
+        sessionId: row.id,
+        slug: row.slug,
+        title: row.title,
+        directory: row.directory,
+        createdAt: row.time_created,
+        updatedAt: row.time_updated,
+        messages: filteredMessages,
+      },
+      dbPath
+    ));
+  }
+
+  return sessions;
+}
+
+/**
+ * 执行 sqlite3 CLI 并解析 -json 输出
+ */
+function runSqliteJson(uri, sql) {
+  const output = execFileSync('sqlite3', ['-json', uri, sql], {
+    maxBuffer: 512 * 1024 * 1024,
+    encoding: 'utf-8',
+  }).trim();
+
+  if (!output) return [];
+  return JSON.parse(output);
+}
+
+/**
+ * 转义 SQL 字符串字面量
+ */
+function quoteSql(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 // ── JSON sample parsing (testing) ───────────────────────────

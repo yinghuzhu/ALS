@@ -43,6 +43,7 @@ program
           claude_code: { enabled: true, path: expandTilde('~/.claude/projects') },
           codex: { enabled: true, path: expandTilde('~/.codex/sessions') },
           codebuddy: { enabled: true, path: expandTilde('~/.codebuddy/projects') },
+          workbuddy: { enabled: true, path: expandTilde('~/.workbuddy/projects') },
           opencode: { enabled: true, mode: 'json', path: expandTilde('~/.local/share/opencode') }
         }
       };
@@ -52,6 +53,7 @@ program
       log(`   Claude Code: ${result.bySource.claude_code || 0}`);
       log(`   Codex CLI: ${result.bySource.codex || 0}`);
       log(`   CodeBuddy: ${result.bySource.codebuddy || 0}`);
+      log(`   WorkBuddy: ${result.bySource.workbuddy || 0}`);
       log(`   OpenCode: ${result.bySource.opencode || 0}`);
     } catch (error) {
       console.error('❌ Pull failed:', error.message);
@@ -101,6 +103,7 @@ program
           claude_code: { enabled: true },
           codex: { enabled: true },
           codebuddy: { enabled: true },
+          workbuddy: { enabled: true },
           opencode: { enabled: true }
         }
       };
@@ -143,6 +146,7 @@ program
     console.log('   Claude Code - Implemented & Tested');
     console.log('   Codex CLI - Implemented & Tested');
     console.log('   CodeBuddy - Implemented & Tested');
+    console.log('   WorkBuddy - Implemented & Tested');
     console.log('   OpenCode - Implemented & Tested');
   });
 

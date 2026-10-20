@@ -127,6 +127,32 @@ export async function needsSync(filePath, content) {
 /**
  * 更新同步状态
  */
+/**
+ * 读取单个文件的同步状态
+ * @param {string} filePath
+ * @returns {Promise<{ hash: string, lastSynced: string, sessionCount: number } | null>}
+ */
+export async function getSyncState(filePath) {
+  const db = await initDb();
+
+  const stmt = db.prepare('SELECT content_hash, last_synced, session_count FROM sync_state WHERE file_path = ?');
+  stmt.bind([filePath]);
+
+  if (!stmt.step()) {
+    stmt.free();
+    return null;
+  }
+
+  const row = stmt.getAsObject();
+  stmt.free();
+
+  return {
+    hash: row.content_hash,
+    lastSynced: row.last_synced,
+    sessionCount: row.session_count,
+  };
+}
+
 export async function updateSyncState(filePath, content, sessionCount) {
   const db = await initDb();
   const hash = calculateFileHash(content);
