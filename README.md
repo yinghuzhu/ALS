@@ -3,7 +3,7 @@
 **Version:** v0.1.0 "Spark"  
 **Status:** v0.1 "Spark" Complete ✅
 
-Local AI session log sync pipeline that transforms session records from Claude Code, Codex CLI, and OpenCode into standardized format for Obsidian output.
+Local AI session log sync pipeline that transforms session records from Claude Code, Codex CLI, CodeBuddy, and OpenCode into standardized format for Obsidian output.
 
 ---
 
@@ -25,6 +25,7 @@ AISessionLog/
 │   ├── adapters/
 │   │   ├── claude.js      # Claude Code JSONL parser ✅
 │   │   ├── codex.js       # Codex CLI JSONL parser ✅
+│   │   ├── codebuddy.js   # CodeBuddy Code JSONL parser ✅
 │   │   └── opencode.js    # OpenCode SQLite/JSON parser ✅
 │   ├── core/
 │   │   ├── types.js       # Standard data models ✅
@@ -39,6 +40,7 @@ AISessionLog/
 ├── tests/
 │   ├── claude.test.js     # Claude adapter tests ✅
 │   ├── codex.test.js      # Codex adapter tests ✅
+│   ├── codebuddy.test.js  # CodeBuddy adapter tests ✅
 │   ├── opencode.test.js   # OpenCode adapter tests ✅
 │   └── verify-adapters.js # Sample data verification ✅
 ├── samples/               # Test data
@@ -109,6 +111,13 @@ asl --help
   - Maps developer role to user
   - 3 sample files tested
 
+- [x] **CodeBuddyAdapter** - Parses `~/.codebuddy/projects/*.jsonl`
+  - 记录类型：`session-meta` / `message` / `function_call` / `function_call_result` / `reasoning`（丢弃）/ `summary` / `ai-title`
+  - 工具调用是独立记录，按 `callId` 与工具返回关联
+  - 流式增量写入的重复 `function_call` 按 `id` 去重（保留最后一条）
+  - 纯噪音会话（只有 `/model` 切换、本地命令回显）跳过
+  - 本机 139 个文件（含 21 个子 Agent 转录）→ 99 个有效会话 / 15.2k 条消息，0 错误
+
 - [x] **OpenCodeAdapter** - Parses SQLite (message + part 双表 JOIN) / JSON samples
   - SQLite 原生读取（逐 session prepared statement，避免全量加载）
   - part 表按 type 分类处理（text/reasoning/tool 保留，step-*/patch/file/compaction 跳过）
@@ -116,17 +125,17 @@ asl --help
 
 ### Phase 3: Test Validation ✅
 
-- [x] 27 unit tests (9 per adapter)
+- [x] 40 unit tests (9-13 per adapter)
 - [x] Sample data verification script
 - [x] 100% sample data parse success rate
 
 **Test Results:**
 ```
-Test Files  3 passed (3)
-Tests       27 passed (27)
+Test Files  4 passed (4)
+Tests       40 passed (40)
 
-Total Sessions:  27
-Total Messages:  510
+Total Sessions:  28
+Total Messages:  483
 Errors:          0
 ```
 
@@ -135,7 +144,7 @@ Errors:          0
 - [x] **SQLite state storage** (`db/state.js`) - sql.js, sync_state/sessions/parse_errors 三张表
 - [x] **Obsidian sink** (`sink/obsidian.js`) - Markdown 渲染、frontmatter、工具调用折叠、增量水位线
 - [x] **File watcher** (`core/watcher.js`) - chokidar + 300ms 防抖
-- [x] **Scanner** (`core/scanner.js`) - 统一扫描接口、增量同步、错误处理
+- [x] **Scanner** (`core/scanner.js`) - 统一扫描接口、增量同步、错误处理；四个 JSONL 数据源共用 `scanJsonlSource`
 - [x] **CLI commands** - pull, watch, sync, status, logs --errors
 
 ---
@@ -148,7 +157,7 @@ Errors:          0
 {
   id: string,              // Internal unique ID
   sourceId: string,        // Original tool session ID
-  source: 'claude_code' | 'codex_cli' | 'opencode',
+  source: 'claude_code' | 'codex_cli' | 'codebuddy' | 'opencode',
   status: 'complete' | 'partial' | 'corrupted',
   project: string,         // Project name from path
   projectPath: string,     // Full project path
@@ -166,7 +175,7 @@ Errors:          0
 ```javascript
 {
   id: string,
-  role: 'user' | 'assistant',
+  role: 'user' | 'assistant' | 'system',
   eventType: 'message' | 'tool_call' | 'tool_result',
   renderedText: string,    // For search/display
   contentBlocks: ContentBlock[],
@@ -196,8 +205,9 @@ node tests/verify-adapters.js
 
 Output:
 ```
-✅ Claude Code: 4 sessions, 94 messages
-✅ Codex CLI:   3 sessions, 316 messages
+✅ Claude Code: 4 sessions, 66 messages
+✅ Codex CLI:   3 sessions, 310 messages
+✅ CodeBuddy:   1 session, 7 messages (另有 1 个纯噪音文件被跳过)
 ✅ OpenCode:    20 sessions, 100 messages (sampled)
 ```
 
@@ -227,6 +237,19 @@ const sessions = parseCodexFile(
 );
 
 console.log(sessions[0].rawMeta.cliVersion); // "0.107.0-alpha.5"
+```
+
+### Parse CodeBuddy Session
+
+```javascript
+import { parseCodeBuddyFile } from './src/adapters/codebuddy.js';
+
+const sessions = parseCodeBuddyFile(
+  '/Users/yzh/.codebuddy/projects/Users-yzh-project-demo/01a1f2b3-4c5d-6e7f-8a9b-0c1d2e3f4a5b.jsonl'
+);
+
+console.log(sessions[0].rawMeta.aiTitle);      // "为 demo-notes 补 README"
+console.log(sessions[0].rawMeta.tokens);       // { promptTokens, completionTokens, totalTokens }
 ```
 
 ### Parse OpenCode Sessions

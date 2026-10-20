@@ -9,7 +9,7 @@
   "scripts": {
     "test": "vitest"
   },
-  "keywords": ["ai", "session", "log", "claude", "codex", "opencode"],
+  "keywords": ["ai", "session", "log", "claude", "codex", "codebuddy", "opencode"],
   "author": "yzh",
   "license": "ISC",
   "dependencies": {

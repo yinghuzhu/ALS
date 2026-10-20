@@ -87,6 +87,7 @@ export async function readJsonlFile(filePath) {
  * 清洗规则：
  * - Claude Code: <local-command-caveat>, <command-name>, <local-command-stdout>, <bash-input>, <bash-stdout>, <bash-stderr>
  * - Codex CLI: <permissions instructions>, <collaboration_mode>, <skills_instructions>, <request_user_input availability>
+ * - CodeBuddy: <system-reminder>, <task-notification>, <cb_summary>, <conversation_history_summary>, 单独的 <command-name>
  * - 通用: <permissions_instructions>（不含连字符的变体）
  */
 export function stripCliMetadata(text) {
@@ -122,9 +123,29 @@ export function stripCliMetadata(text) {
     /This session is being continued from a previous conversation that ran out of context[\s\S]*?(?=\n\n|\n\*\*User)/gm,
   ];
 
-  for (const pattern of [...claudePatterns, ...codexPatterns]) {
-    cleaned = cleaned.replace(pattern, '');
-  }
+  // CodeBuddy 系统标签
+  const codebuddyPatterns = [
+    // 上下文压缩注入的历史摘要（摘要本身可能嵌套 cb_summary / task-notification，先剥外层）
+    /<cb_summary>[\s\S]*?<\/cb_summary>/g,
+    /<conversation_history_summary>[\s\S]*?<\/conversation_history_summary>/g,
+    /<system-reminder[^>]*>[\s\S]*?<\/system-reminder>/g,
+    // 斜杠命令回显：<command-name>/model</command-name>、<command-message>xxx</command-message>
+    /<command-name>[\s\S]*?<\/command-name>/g,
+    /<command-message>[\s\S]*?<\/command-message>/g,
+    // 后台任务通知：通知块本身 + 其后的使用说明都是注入内容，整条丢弃
+    // 放在最后，避免吞掉同一条消息里更外层的闭合标签
+    /<task-notification>[\s\S]*/g,
+  ];
+
+  // 嵌套块（如 cb_summary 套 cb_summary）需要反复清洗直到稳定，
+  // 每次替换都严格缩短字符串，因此循环必然终止
+  let previous;
+  do {
+    previous = cleaned;
+    for (const pattern of [...claudePatterns, ...codexPatterns, ...codebuddyPatterns]) {
+      cleaned = cleaned.replace(pattern, '');
+    }
+  } while (cleaned !== previous);
 
   return cleaned.trim();
 }

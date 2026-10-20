@@ -18,6 +18,7 @@ flowchart TD
         S1["Claude Code\n~/.claude/projects/\n✅ 已验证"]
         S2["Codex CLI\n~/.codex/sessions/\n✅ 已验证"]
         S3["OpenCode\n~/.local/share/opencode/\n✅ 已验证"]
+        S4["CodeBuddy\n~/.codebuddy/projects/\n✅ 已验证"]
     end
 
     subgraph Collector["采集层"]
@@ -29,6 +30,7 @@ flowchart TD
         P1["ClaudeCodeAdapter"]
         P2["CodexAdapter"]
         P3["OpenCodeAdapter"]
+        P4["CodeBuddyAdapter"]
     end
 
     subgraph Core["核心"]
@@ -42,9 +44,9 @@ flowchart TD
         SK3["SQLiteSink\n预留接口"]
     end
 
-    S1 & S2 & S3 --> C1 & C2
-    C1 & C2 --> P1 & P2 & P3
-    P1 & P2 & P3 --> M --> DB --> SK1
+    S1 & S2 & S3 & S4 --> C1 & C2
+    C1 & C2 --> P1 & P2 & P3 & P4
+    P1 & P2 & P3 & P4 --> M --> DB --> SK1
     DB -.-> SK2 & SK3
 ```
 
@@ -395,6 +397,52 @@ LEFT JOIN part p ON m.id = p.message_id
 WHERE m.session_id = ?
 ORDER BY m.time_created ASC, p.time_created ASC
 ```
+
+### CodeBuddyAdapter ✅ 已验证
+
+**输入**: `~/.codebuddy/projects/<encoded-cwd>/<sessionId>.jsonl`
+
+CodeBuddy Code 的存储与 Claude Code 同构（JSONL，一行一条记录），但工具调用是**独立记录**而非 content block。
+
+**记录类型**:
+
+| `type` | 说明 | 处理 |
+| --- | --- | --- |
+| `session-meta` | 会话元数据（agent / 标题） | `rawMeta.agent`、`rawMeta.aiTitle` |
+| `message` | user / assistant 文本 | `contentBlocks[type=text]` |
+| `function_call` | 工具调用 | `contentBlocks[type=tool_use]` |
+| `function_call_result` | 工具返回 | `contentBlocks[type=tool_result]` |
+| `reasoning` | 模型思考过程 | v0.1 丢弃，仅计数 `rawMeta.reasoningRecords` |
+| `summary` / `ai-title` | 首条请求 / AI 标题 | `rawMeta.summary`、`rawMeta.aiTitle` |
+| `turn-metrics` / `model-usage` | 轮次时延 / token 用量 | `rawMeta.turns`、`rawMeta.tokens` |
+| `file-history-snapshot` | 文件快照 | 忽略 |
+
+**字段映射**:
+
+| 原始字段 | 标准字段 | 备注 |
+| --- | --- | --- |
+| `record.sessionId` | `sourceId` | |
+| `record.cwd` | `projectPath` | 目录名把 `/` 编码成 `-`，不可逆，必须取 `cwd` 字段 |
+| `record.timestamp` | `timestamp` | 毫秒整数（如 `1792491547840`） |
+| `message.content[].text` | `contentBlocks[type=text].content` | `input_text` / `output_text` |
+| `function_call.name` / `.arguments` | `tool_use.toolName` / `.content` | `arguments` 已是 JSON 字符串 |
+| `function_call.callId` | `tool_use.toolUseId` | 与返回记录按 `callId` 关联 |
+| `function_call_result.output.text` | `tool_result.content` | 长输出可能已截断，完整内容在 `<sessionId>/tool-results/*.txt` |
+| `providerData.rawUsage` | `rawMeta.tokens` | 按 `(messageId, stepSeq)` 去重后累加 |
+| `providerData.model` | `model` | |
+
+**解析策略**:
+1. 同一 `id` 可能因流式输出被重复写入（`function_call` 参数增量），按 `id` 去重保留最后一条
+2. 纯 CLI 噪音的会话（只有 `/model` 切换、本地命令回显）返回空数组，不产生记录
+3. `reasoning` 不进入消息流，避免检索噪音
+4. 子 Agent 转录（`<encoded-cwd>/<sessionId>/subagents/agent-*.jsonl`）一并解析，各自独立成会话
+
+**噪音清洗规则**（`src/core/utils.js` 的 `stripCliMetadata`）:
+- `<system-reminder>`、`<command-name>`、`<command-message>`、`<local-command-stdout>`
+- `<task-notification>`（含其后的使用说明）
+- `<cb_summary>` / `<conversation_history_summary>`（上下文压缩注入的摘要，可嵌套，需循环清洗）
+
+**实测**: 139 个文件（含 21 个子 Agent 转录）/ 99 个有效会话 / 15,157 条消息，解析 0 错误；40 个纯噪音文件被跳过。
 
 ## 五、SQLite 状态存储
 
