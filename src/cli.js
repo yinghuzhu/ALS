@@ -32,7 +32,8 @@ program
 program
   .command('pull')
   .description('Full import of historical sessions')
-  .action(async () => {
+  .option('--rebuild', '清空输出目录与同步状态后全量重建')
+  .action(async (options) => {
     log('📥 Pulling historical sessions...');
 
     try {
@@ -48,7 +49,7 @@ program
         }
       };
 
-      const result = await scanAndSync(config);
+      const result = options.rebuild ? await rebuildAll(config) : await scanAndSync(config);
       log(`✅ Imported ${result.sessionsProcessed} sessions`);
       log(`   Claude Code: ${result.bySource.claude_code || 0}`);
       log(`   Codex CLI: ${result.bySource.codex || 0}`);
@@ -92,11 +93,12 @@ program
 program
   .command('sync')
   .description('Manually trigger one-time sync')
-  .action(async () => {
+  .option('--rebuild', '清空输出目录与同步状态后全量重建')
+  .action(async (options) => {
     log('🔄 Triggering manual sync...');
 
     try {
-      const { scanAndSync } = await import('./core/scanner.js');
+      const { scanAndSync, rebuildAll } = await import('./core/scanner.js');
       const config = {
         vaultPath: expandTilde('~/Documents/ObsidianVault'),
         sources: {
@@ -108,7 +110,7 @@ program
         }
       };
 
-      const result = await scanAndSync(config);
+      const result = options.rebuild ? await rebuildAll(config) : await scanAndSync(config);
       log(`✅ Synced ${result.sessionsProcessed} sessions`);
     } catch (error) {
       console.error('❌ Sync failed:', error.message);

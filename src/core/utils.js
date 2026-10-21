@@ -4,6 +4,9 @@
 
 import { homedir } from 'os';
 import { createHash } from 'crypto';
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
+import { createZstdDecompress } from 'zlib';
 
 /**
  * 展开路径中的 ~
@@ -20,6 +23,44 @@ export function expandTilde(filePath) {
  */
 export function calculateHash(content) {
   return createHash('sha256').update(content).digest('hex').substring(0, 16);
+}
+
+/**
+ * 流式计算文件内容 hash（避免把超大文件读成一整个字符串）
+ * @param {string} filePath
+ * @returns {Promise<string>}
+ */
+export function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    createReadStream(filePath)
+      .on('data', chunk => hash.update(chunk))
+      .on('error', reject)
+      .on('end', () => resolve(hash.digest('hex').substring(0, 16)));
+  });
+}
+
+/**
+ * 逐行读取会话文件，支持 .jsonl 与 Codex 归档的 .jsonl.zst
+ * 流式解压，内存占用与文件大小无关
+ * @param {string} filePath
+ * @returns {AsyncGenerator<any>}
+ */
+export async function* readJsonlRecords(filePath) {
+  const stream = filePath.endsWith('.zst')
+    ? createReadStream(filePath).pipe(createZstdDecompress())
+    : createReadStream(filePath);
+
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+
+  for await (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      yield JSON.parse(line);
+    } catch (e) {
+      // 与同步实现保持一致：跳过无法解析的行
+    }
+  }
 }
 
 /**

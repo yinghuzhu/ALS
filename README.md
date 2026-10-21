@@ -108,7 +108,7 @@ asl --help
   - Generates content hash
   - 4 sample files tested
 
-- [x] **CodexAdapter** - Parses `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+- [x] **CodexAdapter** - Parses `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`（含归档的 `.jsonl.zst`，流式解压，实测 392MB 压缩 / 1GB+ 解压不出内存问题）
   - Extracts session_meta for context
   - Filters response_item with user/assistant roles
   - Maps developer role to user
@@ -151,9 +151,12 @@ Errors:          0
 
 - [x] **SQLite state storage** (`db/state.js`) - sql.js, sync_state/sessions/parse_errors 三张表
 - [x] **Obsidian sink** (`sink/obsidian.js`) - Markdown 渲染、frontmatter、工具调用折叠、增量水位线
+  - 单篇上限 4MB：超长会话按消息边界拆成多篇（`-p2`、`-p3`…），带 `part/parts` 与上下篇链接，内容不截断
+  - Obsidian 索引线程在 ≥5MB 的 Markdown 上会崩（实测复现），4MB 是留过余量的安全线
 - [x] **File watcher** (`core/watcher.js`) - chokidar + 300ms 防抖，变更即触发单文件增量同步
 - [x] **Scanner** (`core/scanner.js`) - 统一扫描接口、增量同步、错误处理；JSONL 数据源共用 `scanJsonlSource` / `syncJsonlFile`
 - [x] **CLI commands** - pull, watch, sync, status, logs --errors
+- [x] **全量重建** - `sync --rebuild` / `pull --rebuild`：旧笔记改名备份后重建（源文件已清理的会话无法重新生成，需从备份恢复）
 
 > 注意：数据源目录都在 `~/.codex`、`~/.claude` 这类点目录下，chokidar 的 `ignored: /(^|[\/])\./` 会把整棵树排除掉（watch 静默失效），因此不能按隐藏文件过滤。
 

@@ -215,6 +215,8 @@ interface AdapterInterface {
 
 ### CodexAdapter ✅ 已验证
 
+> Codex CLI 会把旧会话归档成 `.jsonl.zst`（本机 791 个 zst / 55 个 jsonl，压缩后 1.9GB）。解析走流式解压（`zlib.createZstdDecompress` + readline），内存与文件大小无关；`sync_state` 的 hash 也改为流式计算。
+
 **存储路径**: `~/.codex/sessions/YYYY/MM/DD/rollout-<sessionId>.jsonl`
 
 **目录结构**:
@@ -572,6 +574,21 @@ useEffect(() => {
 ---
 
 *AISessionLog v0.1 · 原始 ID: original-session-id · [查看原始文件](file:///path/to/source)*
+```
+
+### 分篇（单篇 4MB 上限）
+
+Obsidian 的索引线程在解析大 Markdown 时会崩掉渲染进程（社区已复现：≥5MB 必现，<5MB 稳定），因此 Sink 按体积分篇：
+
+- 单篇上限 **4MB**（`MAX_NOTE_BYTES`），留出 20% 余量
+- 切分优先落在**消息边界**；单条消息自身超限时按行续写，正文一个字节不删
+- 文件名：第 1 篇 `YYYYMMDD_<hash>.md`，其余 `…-p2.md`、`…-p3.md`
+- frontmatter 增加 `part` / `parts`，头部渲染 `(n/N)` 与上下篇 `[[wikilink]]`
+- 单篇会话仍走原来的增量追加逻辑（保留水位线以上的人工笔记）；多篇会话每次整体重写
+
+```
+实测：2628 篇 / 561MB → 2684 篇 / 608MB
+      最大单篇 34MB → 4MB；78 篇超 1MB 的笔记拆成 55 个分片
 ```
 
 ### 增量更新策略
