@@ -100,8 +100,16 @@ export function calculateFileHash(content) {
  * 检查文件是否需要同步
  */
 export async function needsSync(filePath, content) {
+  return needsSyncByHash(filePath, calculateFileHash(content));
+}
+
+/**
+ * 按已算好的 hash 判断是否需要同步（大文件走流式 hash 时用）
+ * @param {string} filePath
+ * @param {string} currentHash
+ */
+export async function needsSyncByHash(filePath, currentHash) {
   const db = await initDb();
-  const currentHash = calculateFileHash(content);
 
   const stmt = db.prepare('SELECT content_hash, last_synced FROM sync_state WHERE file_path = ?');
   stmt.bind([filePath]);
@@ -153,9 +161,27 @@ export async function getSyncState(filePath) {
   };
 }
 
-export async function updateSyncState(filePath, content, sessionCount) {
+/**
+ * 清空同步状态（配合全量重建）
+ */
+export async function resetSyncState() {
   const db = await initDb();
-  const hash = calculateFileHash(content);
+  db.run('DELETE FROM sync_state');
+  saveDb();
+}
+
+export async function updateSyncState(filePath, content, sessionCount) {
+  return updateSyncStateByHash(filePath, calculateFileHash(content), sessionCount);
+}
+
+/**
+ * 按已算好的 hash 记录同步状态
+ * @param {string} filePath
+ * @param {string} hash
+ * @param {number} sessionCount
+ */
+export async function updateSyncStateByHash(filePath, hash, sessionCount) {
+  const db = await initDb();
   const now = new Date().toISOString();
   
   db.run(`

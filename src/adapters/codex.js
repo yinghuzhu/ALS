@@ -10,7 +10,7 @@ import { readFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { basename, dirname } from 'path';
 import { PARSER_VERSION } from '../core/types.js';
-import { filterCliNoise } from '../core/utils.js';
+import { filterCliNoise, readJsonlRecords, hashFile } from '../core/utils.js';
 
 const CODEX_VERSION = '0.1.0';
 
@@ -21,22 +21,55 @@ const CODEX_VERSION = '0.1.0';
  */
 export function parseCodexFile(filePath) {
   const content = readFileSync(filePath, 'utf-8');
-  const lines = content.trim().split('\n').filter(line => line.trim());
-  
-  if (lines.length === 0) {
-    return [];
+  const records = parseLines(content, filePath);
+
+  return buildSessions(records, filePath, createHash('sha256').update(content).digest('hex').substring(0, 16));
+}
+
+/**
+ * 解析归档的 .jsonl.zst：流式解压逐行读取，内存占用与文件大小无关
+ * @param {string} filePath
+ * @returns {Promise<import('../core/types.js').StandardSession[]>}
+ */
+export async function parseCodexFileAsync(filePath) {
+  const records = [];
+  for await (const record of readJsonlRecords(filePath)) {
+    records.push(record);
   }
 
-  // Parse all lines
-  const records = lines.map(line => {
+  return buildSessions(records, filePath, await hashFile(filePath));
+}
+
+/**
+ * 按后缀选择解析方式（.jsonl / .jsonl.zst）
+ * @param {string} filePath
+ */
+export function parseCodexSessionFile(filePath) {
+  return filePath.endsWith('.zst') ? parseCodexFileAsync(filePath) : parseCodexFile(filePath);
+}
+
+/**
+ * 逐行解析 JSONL 文本
+ */
+function parseLines(content, filePath) {
+  const records = [];
+
+  for (const line of content.trim().split('\n')) {
+    if (!line.trim()) continue;
     try {
-      return JSON.parse(line);
+      records.push(JSON.parse(line));
     } catch (e) {
       console.warn(`Failed to parse line in ${filePath}: ${e.message}`);
-      return null;
     }
-  }).filter(Boolean);
+  }
 
+  return records;
+}
+
+/**
+ * 由记录构建 StandardSession
+ */
+function buildSessions(records, filePath, contentHash) {
   if (records.length === 0) {
     return [];
   }
@@ -85,9 +118,6 @@ export function parseCodexFile(filePath) {
       timestamp,
     };
   }));
-
-  // Generate content hash
-  const contentHash = createHash('sha256').update(content).digest('hex').substring(0, 16);
 
   // Extract metadata
   const rawMeta = {

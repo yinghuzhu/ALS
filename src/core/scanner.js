@@ -3,23 +3,23 @@
  * 整合五个 Adapter 和 Obsidian Sink
  */
 
-import { readdirSync, readFileSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, renameSync } from 'fs';
 import { join } from 'path';
-import { expandTilde, log } from './utils.js';
+import { expandTilde, log, hashFile } from './utils.js';
 import { parseClaudeCodeFile } from '../adapters/claude.js';
-import { parseCodexFile } from '../adapters/codex.js';
+import { parseCodexSessionFile } from '../adapters/codex.js';
 import { parseCodeBuddyFile } from '../adapters/codebuddy.js';
 import { parseWorkBuddyFile } from '../adapters/workbuddy.js';
 import { parseOpenCodeFromSqlite } from '../adapters/opencode.js';
 import { exportToObsidian } from '../sink/obsidian.js';
-import { initDb, needsSync, getSyncState, updateSyncState, recordSession, recordError } from '../db/state.js';
+import { initDb, needsSyncByHash, getSyncState, updateSyncState, updateSyncStateByHash, resetSyncState, recordSession, recordError } from '../db/state.js';
 
 /**
  * 基于 JSONL 文件的数据源
  */
 const JSONL_SOURCES = [
   { key: 'claude_code', label: 'Claude', defaultPath: '~/.claude/projects', parse: parseClaudeCodeFile },
-  { key: 'codex', label: 'Codex', defaultPath: '~/.codex/sessions', parse: parseCodexFile },
+  { key: 'codex', label: 'Codex', defaultPath: '~/.codex/sessions', parse: parseCodexSessionFile },
   { key: 'codebuddy', label: 'CodeBuddy', defaultPath: '~/.codebuddy/projects', parse: parseCodeBuddyFile },
   { key: 'workbuddy', label: 'WorkBuddy', defaultPath: '~/.workbuddy/projects', parse: parseWorkBuddyFile },
 ];
@@ -57,6 +57,32 @@ export async function scanAndSync(config) {
 }
 
 /**
+ * 全量重建：清空输出目录与同步状态后重新导入所有数据源
+ * @param {any} config
+ */
+export async function rebuildAll(config) {
+  if (!config?.vaultPath) {
+    throw new Error('rebuild 需要 vaultPath');
+  }
+
+  const outputDir = join(config.vaultPath, 'AISessionLog');
+
+  // 先改名备份而不是直接删除：源文件已被清理的会话无法重新生成，
+  // 留一份旧笔记可以人工恢复（本次重建就有 571 篇 Claude 笔记需要这样恢复）
+  if (existsSync(outputDir)) {
+    const backupDir = `${outputDir}.bak-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    renameSync(outputDir, backupDir);
+    log(`📦 旧笔记已备份到 ${backupDir}`);
+  }
+
+  await initDb();
+  await resetSyncState();
+
+  log(`♻️  已清空 ${outputDir} 与同步状态，开始全量重建`);
+  return scanAndSync(config);
+}
+
+/**
  * 递归查找 JSONL 文件
  */
 function findJsonlFiles(dir) {
@@ -67,7 +93,7 @@ function findJsonlFiles(dir) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       files = files.concat(findJsonlFiles(fullPath));
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+    } else if (entry.isFile() && (entry.name.endsWith('.jsonl') || entry.name.endsWith('.jsonl.zst'))) {
       files.push(fullPath);
     }
   }
@@ -115,21 +141,22 @@ async function scanJsonlSource(source, config) {
  * @returns {Promise<{ sessions: number, skipped: boolean }>}
  */
 async function syncJsonlFile(source, filePath, config) {
-  const content = readFileSync(filePath, 'utf-8');
-  const syncCheck = await needsSync(filePath, content);
+  // 流式 hash：Codex 归档的 .jsonl.zst 解压后可能有上 GB，不能整file读成字符串
+  const hash = await hashFile(filePath);
+  const syncCheck = await needsSyncByHash(filePath, hash);
 
   if (!syncCheck.needsSync) {
     return { sessions: 0, skipped: true };
   }
 
-  const sessions = source.parse(filePath);
+  const sessions = await source.parse(filePath);
 
   for (const session of sessions) {
     await recordSession(session);
     await exportToObsidian(session, config.vaultPath);
   }
 
-  await updateSyncState(filePath, content, sessions.length);
+  await updateSyncStateByHash(filePath, hash, sessions.length);
   return { sessions: sessions.length, skipped: false };
 }
 
