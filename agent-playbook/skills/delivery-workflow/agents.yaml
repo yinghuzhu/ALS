@@ -26,10 +26,25 @@ agents:
     enabled: true
     command: gemini
     models: auto
+  - id: codebuddy
+    type: cli
+    enabled: true
+    command: codebuddy
+    models:
+      - deepseek-v4.1-flash
 selection:
   development:
-    primary: null
+    primary:
+      agent: codebuddy
+      model: deepseek-v4.1-flash
     fallback: []
   testing:
-    primary: null
+    primary:
+      agent: codebuddy
+      model: deepseek-v4.1-flash
     fallback: []
+
+# 主 agent 汇总所有运行中子任务的进度；内置子 agent 与外部 CLI 均适用。
+# 正数，单位分钟；项目配置可覆盖。更严格的平台汇报频率优先。
+progress:
+  interval_minutes: 10
