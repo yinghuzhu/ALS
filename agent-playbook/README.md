@@ -9,6 +9,8 @@
 - [根因排查](skills/root-cause-investigation/SKILL.md)：以证据解释原因、历史正常条件和失败触发变化。
 - [发布交付](skills/release-delivery/SKILL.md)：基线、范围、制品、迁移、验收和回退。
 
+执行者配置文件：`skills/delivery-workflow/agents.yaml`。直接编辑其中的 CLI、模型及开发／测试首选和备用；格式及项目覆盖规则见 [执行者配置说明](skills/delivery-workflow/references/agent-selection.md)。
+
 ## 默认分工与使用
 
 用户与主 agent 共同形成并确认详细设计和测试用例；开发 agent 实现、单测、自测；主 agent 亲自 Review 并推进修复；另一测试 agent 按用例执行和记录问题。明确缺陷在团队内完成开发修复、主 agent 复查、独立复验，业务歧义交用户裁决，最终由用户验收并批准 Git。

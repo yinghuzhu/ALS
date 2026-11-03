@@ -1,0 +1,35 @@
+# delivery-workflow 默认执行者配置，可直接编辑。
+# 项目根 agent-playbook.yaml 可按 ID 覆盖；当前用户明确选择优先。
+# command 只填命令名或单个路径，不填 shell 命令串；不要保存密钥。
+# models 可填 auto 或实际模型 ID 列表；auto 表示运行时核对。
+# primary: null 表示尚未选择；选择格式：{agent: 候选ID, model: 实际模型ID}
+# fallback 是同格式的有序列表；[] 表示没有自动备用。
+# enabled 只表示参与发现，不代表已安装或已获执行授权。
+version: 1
+agents:
+  - id: builtin
+    type: builtin
+    enabled: true
+    models: auto
+  - id: codex
+    type: cli
+    enabled: true
+    command: codex
+    models: auto
+  - id: claude
+    type: cli
+    enabled: true
+    command: claude
+    models: auto
+  - id: gemini
+    type: cli
+    enabled: true
+    command: gemini
+    models: auto
+selection:
+  development:
+    primary: null
+    fallback: []
+  testing:
+    primary: null
+    fallback: []
