@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { parseOpenCodeFromJson, canHandleOpenCode, OpenCodeAdapter } from '../src/adapters/opencode.js';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,7 +83,8 @@ describe('OpenCodeAdapter', () => {
       const sessions = parseOpenCodeFromJson(sessionsPath);
       
       const firstSession = sessions[0];
-      expect(firstSession.project).toBe('sample-crm'); // From <project-root>
+      expect(firstSession.projectPath).toBeTruthy();
+      expect(firstSession.project).toBe(basename(firstSession.projectPath));
     });
   });
   

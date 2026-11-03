@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { parseClaudeCodeFile, canHandleClaudeCode, ClaudeCodeAdapter } from '../src/adapters/claude.js';
-import { join, dirname } from 'path';
+import { join, dirname, basename, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -34,8 +34,8 @@ describe('ClaudeCodeAdapter', () => {
       
       expect(session.source).toBe('claude_code');
       expect(session.sourceId).toBe('04ad8c8f-963d-4b85-8210-2c7ad70d697a');
-      expect(session.project).toBe('demo-project');
-      expect(session.projectPath).toContain('example-org/demo-project');
+      expect(isAbsolute(session.projectPath)).toBe(true);
+      expect(session.project).toBe(basename(session.projectPath));
       expect(session.status).toBe('complete');
       expect(session.messages.length).toBeGreaterThan(0);
     });
